@@ -30,6 +30,9 @@ const App = () => {
     const [error, setError] = useState('');
     const [linkInput, setLinkInput] = useState('');
     const [viewMode, setViewMode] = useState('leaderboard'); // options: 'leaderboard' or 'table'
+    const isTableMode = data && viewMode === 'table';
+    const widthClass = isTableMode ? "max-w-7xl" : "max-w-4xl";
+    const containerClasses = `${widthClass} mx-auto p-6 space-y-8 transition-all duration-300`;
     
     const boardRef = useRef(null);
 
@@ -231,7 +234,7 @@ const App = () => {
     }, []);
 
     return (
-        <div className="max-w-4xl mx-auto p-6 space-y-8">
+        <div className={containerClasses}>
             {/* Header */}
             { !data && (
                 <div className="text-center space-y-2">
@@ -404,7 +407,7 @@ const App = () => {
                         )}
                         
                         <div className="text-center pt-8 border-t border-slate-100 text-slate-400 text-xs">
-                            Generated with Leaderboard Creator
+                            Made with ❤️ by nihaltp
                         </div>
                     </div>
                 </div>
