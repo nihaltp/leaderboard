@@ -163,16 +163,67 @@ const App = () => {
     // --- Handler: Download Image ---
     const handleDownloadImage = async () => {
         if (!boardRef.current) return;
+        setLoading(true);
         
-        const canvas = await html2canvas(boardRef.current, {
-            backgroundColor: "#ffffff",
-            scale: 2
-        });
+        try {
+            const canvas = await html2canvas(boardRef.current, {
+                backgroundColor: "#ffffff",
+                scale: 2,
+                windowWidth: 2500,
+                onclone: (clonedDoc) => {
+                    // --- UN-SCROLL TABLES ---
+                    const scrollableDiv = clonedDoc.querySelector('.overflow-x-auto');
+                    if (scrollableDiv) {
+                        scrollableDiv.style.overflow = 'visible';
+                        scrollableDiv.style.width = 'fit-content';
+                        scrollableDiv.style.maxWidth = 'none';
+                    }
+
+                    // --- EXPAND CONTAINERS ---
+                    const wrapper = clonedDoc.querySelector('.glass-panel');
+                    if (wrapper) {
+                        wrapper.style.width = 'fit-content';
+                        wrapper.style.maxWidth = 'none';
+                        wrapper.style.height = 'auto';
+                        wrapper.style.padding = '40px';
+                    }
+                    
+                    const mainContainer = clonedDoc.querySelector('[class*="max-w-"]');
+                    if (mainContainer) {
+                        mainContainer.style.maxWidth = 'none';
+                        mainContainer.style.width = 'fit-content';
+                    }
+
+                    // --- PREVENT VERTICAL TEXT CLIPPING ---
+                    const textElements = clonedDoc.querySelectorAll('.col-span-5, .col-span-2');
+                    
+                    textElements.forEach(el => {
+                        el.style.display = 'flex';
+                        el.style.alignItems = 'center';
+                        
+                        // Prevent clipping
+                        el.style.overflow = 'visible'; 
+                        el.style.whiteSpace = 'nowrap';
+                        el.style.maxHeight = 'none';
+                        el.style.height = 'auto';
+                        
+                        // Add a tiny bit of padding to buffer the font rendering
+                        el.style.paddingTop = '4px';
+                        el.style.paddingBottom = '4px';
+                    });
+                }
+            });
+            
+            const link = document.createElement("a");
+            link.href = canvas.toDataURL("image/png");
+            link.download = `${viewMode}_${new Date().toISOString().split('T')[0]}.png`;
+            link.click();
+        } catch (err) {
+            console.error(err);
+            setError("Failed to generate image.");
+        }
         
-        const link = document.createElement("a");
-        link.href = canvas.toDataURL("image/png");
-        link.download = `leaderboard-${new Date().toISOString().split('T')[0]}.png`;
-        link.click();
+        setLoading(false);
     };
 
     // --- Handler: Download PDF ---
@@ -379,9 +430,11 @@ const App = () => {
                                         <div key={user.id} className={`grid grid-cols-12 gap-4 items-center p-4 rounded-xl border transition-transform ${getRankStyle(rank)}`}>
                                             <div className="col-span-1 flex justify-center">{getMedalIcon(rank)}
                                             </div>
-                                            <div className="col-span-5 font-bold truncate">{user.name}
+                                            <div className="col-span-5 font-bold truncate flex items-center h-full">
+                                                {user.name}
                                             </div>
-                                            <div className="col-span-2 text-center font-mono font-bold text-lg">{user.score}
+                                            <div className="col-span-2 font-mono font-bold text-lg flex items-center justify-center h-full">
+                                                {user.score}
                                             </div>
                                             <div className="col-span-4 flex flex-col justify-end gap-1">
                                                 <div className="flex justify-between items-center w-full">
