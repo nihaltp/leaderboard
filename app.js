@@ -108,8 +108,18 @@ const App = () => {
         setLoading(true);
         setError('');
 
-        if (url.includes('docs.google.com/spreadsheets') && !url.includes('output=csv')) {
-            setError("Please ensure you use the 'Published to Web' -> 'CSV' link format.");
+        if (!url.includes('docs.google.com/spreadsheets')) {
+            setError("Please ensure you use the 'Published to Web' feature from Google Sheets.");
+            setLoading(false);
+            return;
+        }
+
+        if (!url.endsWith('/pub?output=csv')) {
+            url = url.replace(/\/pub.*$/, '/pub?output=csv');
+        }
+
+        if (!url.includes('output=csv')) {
+            setError("Please ensure you use the 'Published to Web' link format.");
             setLoading(false);
             return;
         }
