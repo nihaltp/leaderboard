@@ -139,9 +139,7 @@ const App = () => {
             return;
         }
 
-        const browserUrl = new URL(window.location);
-        browserUrl.searchParams.set('link', url);
-        window.history.pushState({}, '', browserUrl)
+        updateUrlParams({ link: url });
 
         try {
             const response = await fetch(url);
@@ -228,6 +226,12 @@ const App = () => {
         return <span className="font-bold text-slate-400 w-6 text-center">{index + 1}</span>;
     };
 
+    // --- Handler: Start Over ---
+    const handleStartOver = () => {
+        setData(null);
+        updateUrlParams({ link: null, sheet: null });
+    };
+
     // --- Helper: Get Rank based on type ---
     const getRank = (user, index, allData) => {
         if (rankType === 'competition') {
@@ -242,6 +246,27 @@ const App = () => {
         return index; // default 'ordinal'
     };
 
+    // --- Helper: Update URL with specific order ---
+    const updateUrlParams = (newParams = {}) => {
+        const url = new URL(window.location);
+        
+        // Merge current params with new ones
+        const currentParams = Object.fromEntries(url.searchParams);
+        const allParams = { ...currentParams, ...newParams };
+
+        // Clear the current URL query string
+        url.search = '';
+
+        // Re-add parameters in your PREFERRED ORDER
+        if (allParams.rank) url.searchParams.set('rank', allParams.rank);
+        if (allParams.view) url.searchParams.set('view', allParams.view);
+        if (allParams.link) url.searchParams.set('link', allParams.link);
+        if (allParams.sheet) url.searchParams.set('sheet', allParams.sheet);
+
+        // Update the browser address bar without reloading
+        window.history.pushState({}, '', url);
+    };
+
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         const linkParam = params.get("link");
@@ -254,6 +279,8 @@ const App = () => {
         if (viewParam === 'table' || viewParam === 'leaderboard') {
             setViewMode(viewParam);
         }
+
+        updateUrlParams({ rank: rankType, view: viewMode });
 
         const link = (linkParam) ? linkParam : sheetParam;
         if (link) {
@@ -302,6 +329,7 @@ const App = () => {
                             type="text" 
                             placeholder="Paste Published CSV link..." 
                             value={linkInput}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleLinkSubmit(); }}
                             onChange={(e) => setLinkInput(e.target.value)}
                             className="w-full p-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                         />
@@ -340,7 +368,7 @@ const App = () => {
                     {/* Toolbar */}
                     <div className="flex flex-col sm:flex-row justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-100 gap-4">
                         <div className="flex gap-2">
-                            <button onClick={() => setData(null)} className="text-sm text-slate-500 hover:text-slate-900 font-medium px-4 py-2">← Start Over</button>
+                            <button onClick={handleStartOver} className="text-sm text-slate-500 hover:text-slate-900 font-medium px-4 py-2">← Start Over</button>
                             
                             {/* Toggle View Button */}
                             <button 
@@ -435,13 +463,12 @@ const App = () => {
                                 </table>
                             </div>
                         )}
-                        
-                        <div className="text-center pt-8 border-t border-slate-100 text-slate-400 text-xs">
-                            Made with ❤️ by nihaltp
-                        </div>
                     </div>
                 </div>
             )}
+            <div className="text-center pt-8 border-t border-slate-100 text-slate-400 text-xs">
+                <a href="https://github.com/nihaltp/leaderboard">Made</a> with ❤️ by <a href="https://github.com/nihaltp">nihaltp</a>
+            </div>
         </div>
     );
 };
