@@ -100,24 +100,28 @@ const App = () => {
     // --- Handler: Link Fetch ---
     const handleLinkSubmit = async () => {
         if (!linkInput) return;
+        handleLink(linkInput);
+    };
+
+    // --- Handler: Handle Link ---
+    const handleLink = async (url) => {
         setLoading(true);
         setError('');
 
-        let fetchUrl = linkInput;
-        if (linkInput.includes('docs.google.com/spreadsheets') && !linkInput.includes('output=csv')) {
+        if (url.includes('docs.google.com/spreadsheets') && !url.includes('output=csv')) {
             setError("Please ensure you use the 'Published to Web' -> 'CSV' link format.");
             setLoading(false);
             return;
         }
 
         try {
-            const response = await fetch(fetchUrl);
+            const response = await fetch(url);
             if (!response.ok) throw new Error("Network response was not ok");
             const csvText = await response.text();
             
             Papa.parse(csvText, {
                 complete: processCSV,
-                error: (err) => {
+                error: (_err) => {
                     setError("Error parsing CSV data.");
                     setLoading(false);
                 },
@@ -194,6 +198,16 @@ const App = () => {
         if (index === 2) return <TrophyIcon className="text-orange-400 w-5 h-5" />;
         return <span className="font-bold text-slate-400 w-6 text-center">{index + 1}</span>;
     };
+
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const sheetParam = params.get("sheet");
+
+        if (sheetParam) {
+            setLinkInput(sheetParam);
+            handleLink(sheetParam);
+        }
+    }, []);
 
     return (
         <div className="max-w-4xl mx-auto p-6 space-y-8">
