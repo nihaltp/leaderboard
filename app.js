@@ -34,7 +34,10 @@ const App = () => {
     const isTableMode = data && viewMode === 'table';
     const widthClass = isTableMode ? "max-w-7xl" : "max-w-4xl";
     const containerClasses = `${widthClass} mx-auto p-6 space-y-8 transition-all duration-300`;
-    
+
+    const [title, setTitle] = useState('Event Leaderboard');
+    const [isEditingTitle, setIsEditingTitle] = useState(false);
+
     const boardRef = useRef(null);
 
     // --- Helper: Process CSV Data ---
@@ -280,6 +283,7 @@ const App = () => {
         // Re-add parameters in your PREFERRED ORDER
         if (allParams.rank) url.searchParams.set('rank', allParams.rank);
         if (allParams.view) url.searchParams.set('view', allParams.view);
+        if (allParams.title) url.searchParams.set('title', allParams.title);
         if (allParams.link) url.searchParams.set('link', allParams.link);
         if (allParams.sheet) url.searchParams.set('sheet', allParams.sheet);
 
@@ -293,6 +297,7 @@ const App = () => {
         const sheetParam = params.get("sheet");
         const viewParam = params.get("view");
         const rankParam = params.get("rank");
+        const titleParam = params.get("title");
 
         if (rankParam) setRankType(rankParam);
 
@@ -300,7 +305,9 @@ const App = () => {
             setViewMode(viewParam);
         }
 
-        updateUrlParams({ rank: rankType, view: viewMode });
+        if (titleParam) setTitle(decodeURIComponent(titleParam));
+
+        updateUrlParams({ rank: rankType, view: viewMode, title: encodeURIComponent(title) });
 
         const link = (linkParam) ? linkParam : sheetParam;
         if (link) {
@@ -408,9 +415,41 @@ const App = () => {
                     {/* CONTENT CONTAINER */}
                     <div ref={boardRef} className="glass-panel p-8 rounded-3xl space-y-6 min-h-[600px] flex flex-col bg-white">
                         <div className="text-center mb-6">
-                            <h2 className="text-3xl font-bold text-slate-800">
-                                {viewMode === 'leaderboard' ? '🏆 Event Leaderboard' : '📊 Detailed Results'}
-                            </h2>
+                            {isEditingTitle ? (
+                                // --- EDIT MODE: Input Field ---
+                                <div className="flex justify-center items-center gap-2">
+                                    <span className="text-3xl">
+                                        {viewMode === 'leaderboard' ? '🏆' : '📊'}
+                                    </span>
+                                    <input
+                                        type="text"
+                                        value={title}
+                                        onChange={(e) => setTitle(e.target.value)}
+                                        onBlur={() => {
+                                            setIsEditingTitle(false);
+                                            updateUrlParams({ title: title });
+                                        }}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                                setIsEditingTitle(false);
+                                                updateUrlParams({ title: title });
+                                            }
+                                        }}
+                                        autoFocus
+                                        className="text-3xl font-bold text-slate-800 text-center bg-transparent border-b-2 border-blue-500 focus:outline-none min-w-[200px]"
+                                    />
+                                </div>
+                            ) : (
+                                // --- VIEW MODE: Text Heading ---
+                                <h2 
+                                    onDoubleClick={() => setIsEditingTitle(true)}
+                                    className="text-3xl font-bold text-slate-800 cursor-pointer hover:text-blue-600 transition-colors select-none"
+                                    title="Double click to edit title"
+                                >
+                                    {viewMode === 'leaderboard' ? '🏆 ' : '📊 '}
+                                    {title}
+                                </h2>
+                            )}
                             <p className="text-slate-400 text-sm mt-1">{new Date().toLocaleDateString()}</p>
                         </div>
 
