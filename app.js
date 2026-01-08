@@ -138,6 +138,10 @@ const App = () => {
             return;
         }
 
+        const browserUrl = new URL(window.location);
+        browserUrl.searchParams.set('link', url);
+        window.history.pushState({}, '', browserUrl)
+
         try {
             const response = await fetch(url);
             if (!response.ok) throw new Error("Network response was not ok");
