@@ -30,6 +30,7 @@ const App = () => {
     const [error, setError] = useState('');
     const [linkInput, setLinkInput] = useState('');
     const [viewMode, setViewMode] = useState('leaderboard'); // options: 'leaderboard' or 'table'
+    const [rankType, setRankType] = useState('dense'); // options: 'ordinal', 'competition', 'dense'
     const isTableMode = data && viewMode === 'table';
     const widthClass = isTableMode ? "max-w-7xl" : "max-w-4xl";
     const containerClasses = `${widthClass} mx-auto p-6 space-y-8 transition-all duration-300`;
@@ -227,11 +228,28 @@ const App = () => {
         return <span className="font-bold text-slate-400 w-6 text-center">{index + 1}</span>;
     };
 
+    // --- Helper: Get Rank based on type ---
+    const getRank = (user, index, allData) => {
+        if (rankType === 'competition') {
+            // Rank is the index of the first person with this score
+            return allData.findIndex(u => u.score === user.score);
+        } 
+        else if (rankType === 'dense') {
+            // Rank is based on the list of unique scores
+            const uniqueScores = [...new Set(allData.map(u => u.score))];
+            return uniqueScores.indexOf(user.score);
+        } 
+        return index; // default 'ordinal'
+    };
+
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         const linkParam = params.get("link");
         const sheetParam = params.get("sheet");
         const viewParam = params.get("view");
+        const rankParam = params.get("rank");
+
+        if (rankParam) setRankType(rankParam);
 
         if (viewParam === 'table' || viewParam === 'leaderboard') {
             setViewMode(viewParam);
@@ -358,10 +376,11 @@ const App = () => {
                                     <div className="col-span-4 text-right">Progress</div>
                                 </div>
                                 {data.map((user, index) => {
+                                    const rank = getRank(user, index, data);
                                     const percent = dates.length > 0 ? Math.round((user.score / dates.length) * 100) : 0;
                                     return (
-                                        <div key={user.id} className={`grid grid-cols-12 gap-4 items-center p-4 rounded-xl border transition-transform ${getRankStyle(index)}`}>
-                                            <div className="col-span-1 flex justify-center">{getMedalIcon(index)}
+                                        <div key={user.id} className={`grid grid-cols-12 gap-4 items-center p-4 rounded-xl border transition-transform ${getRankStyle(rank)}`}>
+                                            <div className="col-span-1 flex justify-center">{getMedalIcon(rank)}
                                             </div>
                                             <div className="col-span-5 font-bold truncate">{user.name}
                                             </div>
