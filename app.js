@@ -226,6 +226,11 @@ const App = () => {
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         const sheetParam = params.get("sheet");
+        const viewParam = params.get("view");
+
+        if (viewParam === 'table' || viewParam === 'leaderboard') {
+            setViewMode(viewParam);
+        }
 
         if (sheetParam) {
             setLinkInput(sheetParam);
