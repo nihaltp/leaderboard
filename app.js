@@ -18,6 +18,10 @@ const TrophyIcon = ({ className }) => (
     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2h-4a4 4 0 0 0-4 4v10a4 4 0 0 0 4 4h4a4 4 0 0 0 4-4V6a4 4 0 0 0-4-4Z"/></svg>
 );
 
+const ListIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+);
+
 // --- Main App Component ---
 const App = () => {
     const [data, setData] = useState(null);
@@ -25,6 +29,8 @@ const App = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [linkInput, setLinkInput] = useState('');
+    const [viewMode, setViewMode] = useState('leaderboard'); // options: 'leaderboard' or 'table'
+    
     const boardRef = useRef(null);
 
     // --- Helper: Process CSV Data ---
@@ -51,18 +57,23 @@ const App = () => {
                 if (!name || !name.trim()) continue;
 
                 let score = 0;
+                const history = []; // Capture the raw data per day
                 
                 // Iterate ONLY through columns corresponding to valid date headers
                 // This prevents counting marks in empty 'trailing' columns
                 for (let j = 1; j <= dateHeaders.length; j++) {
                     const cellValue = row[j] ? row[j].trim() : '';
-                    if (cellValue.includes('✅')) score++;
+                    const isDone = cellValue.includes('✅');
+                    
+                    if (isDone) score++;
+                    history.push(isDone);
                 }
 
                 participants.push({
                     id: i,
                     name: name.trim(),
-                    score
+                    score,
+                    history
                 });
             }
 
@@ -268,7 +279,7 @@ const App = () => {
                             Fetch Leaderboard
                         </button>
                         <p className="text-xs text-slate-400">
-                            *Must use <strong>File > Share > Publish to Web > CSV</strong>
+                            *Must use <strong>File > Share > Publish to Web</strong>
                         </p>
                     </div>
                 </div>
@@ -289,83 +300,106 @@ const App = () => {
                 </div>
             )}
 
-            {/* Leaderboard Visualization */}
+            {/* Main Content Area */}
             {data && (
                 <div className="space-y-6">
                     {/* Toolbar */}
                     <div className="flex flex-col sm:flex-row justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-100 gap-4">
-                        <button 
-                            onClick={() => setData(null)}
-                            className="text-sm text-slate-500 hover:text-slate-900 font-medium px-4 py-2"
-                        >
-                            ← Start Over
-                        </button>
+                        <div className="flex gap-2">
+                            <button onClick={() => setData(null)} className="text-sm text-slate-500 hover:text-slate-900 font-medium px-4 py-2">← Start Over</button>
+                            
+                            {/* Toggle View Button */}
+                            <button 
+                                onClick={() => setViewMode(viewMode === 'leaderboard' ? 'table' : 'leaderboard')}
+                                className="flex items-center gap-2 bg-slate-100 text-slate-700 px-4 py-2 rounded-lg font-semibold hover:bg-slate-200 transition-colors"
+                            >
+                                <ListIcon /> {viewMode === 'leaderboard' ? 'View Data' : 'View Visuals'}
+                            </button>
+                        </div>
                         
                         <div className="flex gap-2">
-                            <button 
-                                onClick={handleDownloadImage}
-                                className="flex items-center gap-2 bg-blue-100 text-blue-700 px-4 py-2 rounded-lg font-semibold hover:bg-blue-200 transition-colors"
-                            >
-                                <DownloadIcon /> Save Image
-                            </button>
-                            <button 
-                                onClick={handleDownloadPDF}
-                                className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-lg font-semibold hover:bg-slate-800 transition-colors shadow-lg shadow-slate-200"
-                            >
-                                <FileIcon /> Save PDF
-                            </button>
+                            <button onClick={handleDownloadImage} className="flex items-center gap-2 bg-blue-100 text-blue-700 px-4 py-2 rounded-lg font-semibold hover:bg-blue-200 transition-colors"><DownloadIcon /> Image</button>
+                            <button onClick={handleDownloadPDF} className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-lg font-semibold hover:bg-slate-800 transition-colors shadow-lg shadow-slate-200"><FileIcon /> PDF</button>
                         </div>
                     </div>
 
-                    {/* The Actual Board to Screenshot */}
-                    <div ref={boardRef} className="glass-panel p-8 rounded-3xl space-y-6 min-h-[600px] flex flex-col">
+                    {/* CONTENT CONTAINER */}
+                    <div ref={boardRef} className="glass-panel p-8 rounded-3xl space-y-6 min-h-[600px] flex flex-col bg-white">
                         <div className="text-center mb-6">
-                            <h2 className="text-3xl font-bold text-slate-800">🏆 Event Leaderboard</h2>
+                            <h2 className="text-3xl font-bold text-slate-800">
+                                {viewMode === 'leaderboard' ? '🏆 Event Leaderboard' : '📊 Detailed Results'}
+                            </h2>
                             <p className="text-slate-400 text-sm mt-1">{new Date().toLocaleDateString()}</p>
                         </div>
 
-                        <div className="flex-1 space-y-3">
-                            {/* Table Header */}
-                            <div className="grid grid-cols-12 gap-4 px-6 py-2 text-xs font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-100">
-                                <div className="col-span-1 text-center">#</div>
-                                <div className="col-span-5">Participant</div>
-                                <div className="col-span-2 text-center">Score</div>
-                                <div className="col-span-4 text-right">Progress</div>
+                        {/* --- VIEW 1: VISUAL CARDS --- */}
+                        {viewMode === 'leaderboard' && (
+                            <div className="flex-1 space-y-3">
+                                <div className="grid grid-cols-12 gap-4 px-6 py-2 text-xs font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                                    <div className="col-span-1 text-center">#</div>
+                                    <div className="col-span-5">Participant</div>
+                                    <div className="col-span-2 text-center">Score</div>
+                                    <div className="col-span-4 text-right">Progress</div>
+                                </div>
+                                {data.map((user, index) => {
+                                    const percent = dates.length > 0 ? Math.round((user.score / dates.length) * 100) : 0;
+                                    return (
+                                        <div key={user.id} className={`grid grid-cols-12 gap-4 items-center p-4 rounded-xl border transition-transform ${getRankStyle(index)}`}>
+                                            <div className="col-span-1 flex justify-center">{getMedalIcon(index)}
+                                            </div>
+                                            <div className="col-span-5 font-bold truncate">{user.name}
+                                            </div>
+                                            <div className="col-span-2 text-center font-mono font-bold text-lg">{user.score}
+                                            </div>
+                                            <div className="col-span-4 flex flex-col justify-end gap-1">
+                                                <div className="flex justify-between items-center w-full">
+                                                    <span className="text-xs font-medium opacity-60 ml-auto">{percent}%
+                                                    </span>
+                                                </div>
+                                                <div className="h-2 bg-slate-200/50 rounded-full w-full overflow-hidden relative">
+                                                    <div className="absolute top-0 left-0 h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${percent}%` }}>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
+                        )}
 
-                            {/* Rows */}
-                            {data.map((user, index) => {
-                                // Calculate percent based on maximum possible score (total dates)
-                                const percent = dates.length > 0 ? Math.round((user.score / dates.length) * 100) : 0;
-                                return (
-                                    <div 
-                                        key={user.id} 
-                                        className={`grid grid-cols-12 gap-4 items-center p-4 rounded-xl border transition-transform ${getRankStyle(index)}`}
-                                    >
-                                        <div className="col-span-1 flex justify-center">
-                                            {getMedalIcon(index)}
-                                        </div>
-                                        <div className="col-span-5 font-bold truncate">
-                                            {user.name}
-                                        </div>
-                                        <div className="col-span-2 text-center font-mono font-bold text-lg">
-                                            {user.score}
-                                        </div>
-                                        <div className="col-span-4 flex flex-col justify-end gap-1">
-                                            <div className="flex justify-between items-center w-full">
-                                                <span className="text-xs font-medium opacity-60 ml-auto">{percent}%</span>
-                                            </div>
-                                            <div className="h-2 bg-slate-200/50 rounded-full w-full overflow-hidden relative">
-                                                 <div
-                                                    className="absolute top-0 left-0 h-full bg-emerald-500 rounded-full transition-all duration-500"
-                                                    style={{ width: `${percent}%` }}
-                                                 ></div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
+                        {/* --- VIEW 2: DATA TABLE (NEW) --- */}
+                        {viewMode === 'table' && (
+                            <div className="overflow-x-auto custom-scroll">
+                                <table className="w-full text-sm text-left border-collapse">
+                                    <thead className="text-xs text-slate-400 uppercase bg-slate-50 border-b border-slate-200">
+                                        <tr>
+                                            <th className="px-4 py-3 text-center w-12">#</th>
+                                            <th className="px-4 py-3 border-r border-slate-100">Name</th>
+                                            <th className="px-4 py-3 text-center font-bold text-slate-700 bg-slate-100/50">Total</th>
+                                            {/* Render Date Columns */}
+                                            {dates.map((date, i) => (
+                                                <th key={i} className="px-2 py-3 text-center whitespace-nowrap min-w-[60px]">{date}</th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {data.map((user, idx) => (
+                                            <tr key={user.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
+                                                <td className="px-4 py-3 text-center font-mono text-slate-400">{idx + 1}</td>
+                                                <td className="px-4 py-3 font-medium text-slate-700 border-r border-slate-100">{user.name}</td>
+                                                <td className="px-4 py-3 text-center font-bold text-slate-900 bg-slate-50/30">{user.score}</td>
+                                                {/* Render Date Cells using History */}
+                                                {user.history.map((done, i) => (
+                                                    <td key={i} className="px-2 py-3 text-center">
+                                                        {done ? '✅' : <span className="text-slate-200">·</span>}
+                                                    </td>
+                                                ))}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
                         
                         <div className="text-center pt-8 border-t border-slate-100 text-slate-400 text-xs">
                             Generated with Leaderboard Creator
