@@ -22,3 +22,45 @@ body { font-family: 'Inter', sans-serif; }
 .custom-scroll::-webkit-scrollbar-thumb:hover {
     background: #94a3b8; 
 }
+
+@page {
+    margin: 0;
+    size: auto;
+}
+
+@media print {
+    body {
+        padding: 20px 40px !important;
+    }
+
+    button, input, .no-print {
+        display: none !important;
+    }
+
+    .max-w-4xl, .max-w-7xl {
+        max-width: 100% !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+
+    .glass-panel {
+        background: white !important;
+        border: none !important;
+        box-shadow: none !important;
+        min-height: auto !important;
+    }
+
+    * {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+    
+
+    .overflow-x-auto {
+        overflow: visible !important;
+    }
+    
+    body {
+        background: white;
+    }
+}

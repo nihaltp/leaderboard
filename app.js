@@ -177,38 +177,7 @@ const App = () => {
 
     // --- Handler: Download PDF ---
     const handleDownloadPDF = async () => {
-        if (!boardRef.current) return;
-        
-        setLoading(true);
-        
-        try {
-            // Generate canvas
-            const canvas = await html2canvas(boardRef.current, {
-                scale: 2,
-                backgroundColor: "#ffffff"
-            });
-            const imgData = canvas.toDataURL('image/png');
-
-            // Initialize PDF (A4 size)
-            const pdf = new jsPDF({
-                orientation: 'portrait',
-                unit: 'mm',
-                format: 'a4'
-            });
-
-            // Calculate dimensions to fit A4 width
-            const pdfWidth = pdf.internal.pageSize.getWidth();
-            const imgProps = pdf.getImageProperties(imgData);
-            const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-
-            // Add image to PDF
-            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-            pdf.save(`leaderboard-${new Date().toISOString().split('T')[0]}.pdf`);
-        } catch (err) {
-            setError("Failed to generate PDF");
-        }
-        
-        setLoading(false);
+        window.print();
     };
 
     // --- Helper: Medal Colors ---
