@@ -225,6 +225,7 @@ const App = () => {
 
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
+        const linkParam = params.get("link");
         const sheetParam = params.get("sheet");
         const viewParam = params.get("view");
 
@@ -232,9 +233,10 @@ const App = () => {
             setViewMode(viewParam);
         }
 
-        if (sheetParam) {
-            setLinkInput(sheetParam);
-            handleLink(sheetParam);
+        const link = (linkParam) ? linkParam : sheetParam;
+        if (link) {
+            setLinkInput(link);
+            handleLink(link);
         }
     }, []);
 
