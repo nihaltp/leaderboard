@@ -1,4 +1,4 @@
-const { useState, useRef, useEffect } = React;
+const { useState, useRef, useEffect, useMemo } = React;
 const { jsPDF } = window.jspdf;
 
 const UploadIcon = () => (
@@ -22,19 +22,26 @@ const ListIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
 );
 
+// --- CONSTANTS ---
+const MODES = {
+    POINTS: { id: 'points', label: 'Total Points', icon: '⚡', desc: 'Every check counts' },
+    CONSISTENCY: { id: 'consistency', label: 'Consistency', icon: '📅', desc: 'Days completed' },
+    STREAK: { id: 'streak', label: 'Current Streak', icon: '🔥', desc: 'Consecutive days' }
+};
+
 // --- Main App Component ---
 const App = () => {
-    const [data, setData] = useState(null);
+    // State
+    const [rawData, setRawData] = useState(null); // Unsorted participants
     const [dates, setDates] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [linkInput, setLinkInput] = useState('');
-    const [viewMode, setViewMode] = useState('leaderboard'); // options: 'leaderboard' or 'table'
-    const [rankType, setRankType] = useState('dense'); // options: 'ordinal', 'competition', 'dense'
-    const isTableMode = data && viewMode === 'table';
-    const widthClass = isTableMode ? "max-w-7xl" : "max-w-4xl";
-    const containerClasses = `${widthClass} mx-auto p-6 space-y-8 transition-all duration-300`;
-
+    
+    // View Config
+    const [viewMode, setViewMode] = useState('leaderboard'); // 'leaderboard' | 'table'
+    const [rankType, setRankType] = useState('dense'); // 'dense' | 'competition'
+    const [scoringMode, setScoringMode] = useState('points'); // 'points' | 'consistency' | 'streak'
     const [title, setTitle] = useState('Event Leaderboard');
     const [isEditingTitle, setIsEditingTitle] = useState(false);
 
@@ -43,203 +50,174 @@ const App = () => {
     // --- Helper: Process CSV Data ---
     const processCSV = (results) => {
         try {
-            const rawData = results.data;
-            if (!rawData || rawData.length < 2) {
-                throw new Error("Spreadsheet appears to be empty or missing header/rows.");
-            }
+            const raw = results.data;
+            if (!raw || raw.length < 2) throw new Error("Empty sheet");
 
             // Row 0: Dates
-            const headerRow = rawData[0];
-            // Filter valid date headers (exclude empty cells)
+            const headerRow = raw[0];
             const dateHeaders = headerRow.slice(1).filter(d => d && d.trim().length > 0);
             
             const participants = [];
 
             // Start from Row 1 (actual data)
-            for (let i = 1; i < rawData.length; i++) {
-                const row = rawData[i];
+            for (let i = 1; i < raw.length; i++) {
+                const row = raw[i];
                 const name = row[0];
                 
                 // Skip empty rows or rows without names
                 if (!name || !name.trim()) continue;
 
-                let score = 0;
+                let points = 0;
+                let consistency = 0;
                 const history = []; // Capture the raw data per day
-                
-                // Iterate ONLY through columns corresponding to valid date headers
-                // This prevents counting marks in empty 'trailing' columns
+
                 for (let j = 1; j <= dateHeaders.length; j++) {
                     const cellValue = row[j] ? row[j].trim() : '';
-                    const isDone = cellValue.includes('✅');
+                    const count = [...cellValue].filter(ch => ch === '✅').length;
                     
-                    if (isDone) score++;
-                    history.push(isDone);
+                    if (count > 0) {
+                        points += count;   // Mode 1: All checks
+                        consistency += 1;  // Mode 2: Days active
+                    }
+                    history.push(count);
+                }
+
+                // Calculate Streak (Mode 3: Consecutive days)
+                let streak = 0;
+                for (let k = history.length - 1; k >= 0; k--) {
+                    if (history[k] > 0) streak++;
+                    else break;
                 }
 
                 participants.push({
                     id: i,
                     name: name.trim(),
-                    score,
+                    stats: {
+                        points,
+                        consistency,
+                        streak
+                    },
                     history
                 });
             }
 
-            // Sort by score (descending)
-            participants.sort((a, b) => b.score - a.score);
-
             setDates(dateHeaders);
-            setData(participants);
+            setRawData(participants);
             setLoading(false);
         } catch (err) {
             console.error(err);
-            setError("Failed to process data. Ensure the format matches: Column 1 = Names, Row 1 = Dates, Cells = ✅");
+            setError("Failed to parse data. Ensure 1st row = Dates, 1st Col = Names.");
             setLoading(false);
         }
     };
 
-    // --- Handler: File Upload ---
+    // --- SORTED DATA (MEMOIZED) ---
+    const sortedData = useMemo(() => {
+        if (!rawData) return [];
+        
+        // clone and sort
+        const sorted = [...rawData].sort((a, b) => {
+            const valA = a.stats[scoringMode];
+            const valB = b.stats[scoringMode];
+            
+            // Primary sort: selected mode
+            if (valB !== valA) return valB - valA;
+            
+            // Tie-breakers
+            if (scoringMode === 'streak') return b.stats.points - a.stats.points;
+            if (scoringMode === 'consistency') return b.stats.points - a.stats.points;
+            return b.stats.consistency - a.stats.consistency;
+        });
+
+        return sorted;
+    }, [rawData, scoringMode]);
+
+    // --- HANDLERS ---
     const handleFileUpload = (e) => {
         const file = e.target.files[0];
         if (!file) return;
         
         setLoading(true);
-        setError('');
-        
         Papa.parse(file, {
             complete: processCSV,
-            error: (err) => {
-                setError("Error parsing CSV file: " + err.message);
-                setLoading(false);
-            },
+            error: (err) => { setError(err.message); setLoading(false); },
             header: false
         });
     };
 
-    // --- Handler: Link Fetch ---
-    const handleLinkSubmit = async () => {
-        if (!linkInput) return;
-        handleLink(linkInput);
-    };
-
-    // --- Handler: Handle Link ---
     const handleLink = async (url) => {
         setLoading(true);
         setError('');
-
-        if (!url.includes('docs.google.com/spreadsheets')) {
-            setError("Please ensure you use the 'Published to Web' feature from Google Sheets.");
-            setLoading(false);
-            return;
-        }
-
-        if (!url.endsWith('/pub?output=csv')) {
-            url = url.replace(/\/pub.*$/, '/pub?output=csv');
-        }
-
+        
+        // Clean URL
+        let fetchUrl = url;
         if (!url.includes('output=csv')) {
-            setError("Please ensure you use the 'Published to Web' link format.");
-            setLoading(false);
-            return;
+            if (url.includes('/edit')) fetchUrl = url.replace(/\/edit.*$/, '/pub?output=csv');
+            else fetchUrl = url + '/pub?output=csv';
         }
-
-        updateUrlParams({ link: url });
+        updateUrlParams({ link: fetchUrl });
 
         try {
-            const response = await fetch(url);
-            if (!response.ok) throw new Error("Network response was not ok");
-            const csvText = await response.text();
-            
-            Papa.parse(csvText, {
+            const res = await fetch(fetchUrl);
+            if (!res.ok) throw new Error("Network error");
+            const txt = await res.text();
+            Papa.parse(txt, {
                 complete: processCSV,
-                error: (_err) => {
-                    setError("Error parsing CSV data.");
-                    setLoading(false);
-                },
+                error: () => { setError("CSV Parse Error"); setLoading(false); },
                 header: false
             });
-        } catch (err) {
-            setError("Could not fetch the link. Likely a CORS issue or Private Sheet. Use 'File > Share > Publish to Web' and select 'CSV'.");
+        } catch (e) {
+            setError("Could not fetch sheet. Ensure it is 'Published to Web' as CSV.");
             setLoading(false);
         }
     };
 
-    // --- Handler: Download Image ---
-    const handleDownloadImage = async () => {
-        if (!boardRef.current) return;
-        setLoading(true);
+    // --- URL SYNC ---
+    const updateUrlParams = (newParams = {}) => {
+        const url = new URL(window.location);
+        const current = Object.fromEntries(url.searchParams);
+        const merged = { ...current, ...newParams };
         
-        try {
-            const canvas = await html2canvas(boardRef.current, {
-                backgroundColor: "#ffffff",
-                scale: 2,
-                windowWidth: 2500,
-                onclone: (clonedDoc) => {
-                    // --- UN-SCROLL TABLES ---
-                    const scrollableDiv = clonedDoc.querySelector('.overflow-x-auto');
-                    if (scrollableDiv) {
-                        scrollableDiv.style.overflow = 'visible';
-                        scrollableDiv.style.width = 'fit-content';
-                        scrollableDiv.style.maxWidth = 'none';
-                    }
-
-                    // --- EXPAND CONTAINERS ---
-                    const wrapper = clonedDoc.querySelector('.glass-panel');
-                    if (wrapper) {
-                        wrapper.style.width = 'fit-content';
-                        wrapper.style.maxWidth = 'none';
-                        wrapper.style.height = 'auto';
-                        wrapper.style.padding = '40px';
-                    }
-                    
-                    const mainContainer = clonedDoc.querySelector('[class*="max-w-"]');
-                    if (mainContainer) {
-                        mainContainer.style.maxWidth = 'none';
-                        mainContainer.style.width = 'fit-content';
-                    }
-
-                    // --- PREVENT VERTICAL TEXT CLIPPING ---
-                    const textElements = clonedDoc.querySelectorAll('.col-span-5, .col-span-2');
-                    
-                    textElements.forEach(el => {
-                        el.style.display = 'flex';
-                        el.style.alignItems = 'center';
-                        
-                        // Prevent clipping
-                        el.style.overflow = 'visible'; 
-                        el.style.whiteSpace = 'nowrap';
-                        el.style.maxHeight = 'none';
-                        el.style.height = 'auto';
-                        
-                        // Add a tiny bit of padding to buffer the font rendering
-                        el.style.paddingTop = '4px';
-                        el.style.paddingBottom = '4px';
-                    });
-                }
-            });
-            
-            const link = document.createElement("a");
-            link.href = canvas.toDataURL("image/png");
-            link.download = `${viewMode}_${new Date().toISOString().split('T')[0]}.png`;
-            link.click();
-        } catch (err) {
-            console.error(err);
-            setError("Failed to generate image.");
-        }
+        url.search = '';
+        if (merged.rank) url.searchParams.set('rank', merged.rank);
+        if (merged.view) url.searchParams.set('view', merged.view);
+        if (merged.mode) url.searchParams.set('mode', merged.mode);
+        if (merged.title) url.searchParams.set('title', merged.title);
+        if (merged.link) url.searchParams.set('link', merged.link);
         
-        setLoading(false);
+        window.history.pushState({}, '', url);
     };
 
-    // --- Handler: Download PDF ---
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("title")) setTitle(decodeURIComponent(params.get("title")));
+        if (params.get("mode") && MODES[params.get("mode").toUpperCase()]) setScoringMode(params.get("mode"));
+        if (params.get("view")) setViewMode(params.get("view"));
+        
+        const link = params.get("link");
+        if (link) {
+            setLinkInput(link);
+            handleLink(link);
+        }
+    }, []);
+
+    useEffect(() => {
+        if(rawData) updateUrlParams({ mode: scoringMode, view: viewMode, title: encodeURIComponent(title) });
+    }, [scoringMode, viewMode, title, rawData]);
+
+
+    // --- HELPERS ---
     const handleDownloadPDF = async () => {
         window.print();
     };
 
-    // --- Helper: Medal Colors ---
-    const getRankStyle = (index) => {
-        if (index === 0) return "bg-yellow-100 border-yellow-300 text-yellow-800";
-        if (index === 1) return "bg-slate-200 border-slate-300 text-slate-800";
-        if (index === 2) return "bg-orange-100 border-orange-300 text-orange-800";
-        return "bg-white border-slate-100 text-slate-600";
+    const getRank = (user, index, allData) => {
+        const score = user.stats[scoringMode];
+        if (rankType === 'dense') {
+            const unique = [...new Set(allData.map(u => u.stats[scoringMode]))];
+            return unique.indexOf(score);
+        }
+        return index;
     };
     
     const getMedalIcon = (index) => {
@@ -249,240 +227,201 @@ const App = () => {
         return <span className="font-bold text-slate-400 w-6 text-center">{index + 1}</span>;
     };
 
-    // --- Handler: Start Over ---
-    const handleStartOver = () => {
-        setData(null);
-        updateUrlParams({ link: null, sheet: null });
+    const getRankStyle = (index) => {
+        if (index === 0) return "bg-yellow-50 border-yellow-200 text-yellow-900";
+        if (index === 1) return "bg-slate-50 border-slate-200 text-slate-900";
+        if (index === 2) return "bg-orange-50 border-orange-200 text-orange-900";
+        return "bg-white border-slate-100 text-slate-600";
     };
 
-    // --- Helper: Get Rank based on type ---
-    const getRank = (user, index, allData) => {
-        if (rankType === 'competition') {
-            // Rank is the index of the first person with this score
-            return allData.findIndex(u => u.score === user.score);
-        } 
-        else if (rankType === 'dense') {
-            // Rank is based on the list of unique scores
-            const uniqueScores = [...new Set(allData.map(u => u.score))];
-            return uniqueScores.indexOf(user.score);
-        } 
-        return index; // default 'ordinal'
+    // --- Progress Bar Color ---
+    const getBarColor = (rank) => {
+        if (rank === 0) return "bg-yellow-400"; // Gold
+        if (rank === 1) return "bg-slate-400";  // Silver
+        if (rank === 2) return "bg-orange-400"; // Bronze
+        return "bg-emerald-500";                // Everyone else: Green
     };
 
-    // --- Helper: Update URL with specific order ---
-    const updateUrlParams = (newParams = {}) => {
-        const url = new URL(window.location);
-        
-        // Merge current params with new ones
-        const currentParams = Object.fromEntries(url.searchParams);
-        const allParams = { ...currentParams, ...newParams };
-
-        // Clear the current URL query string
-        url.search = '';
-
-        // Re-add parameters in your PREFERRED ORDER
-        if (allParams.rank) url.searchParams.set('rank', allParams.rank);
-        if (allParams.view) url.searchParams.set('view', allParams.view);
-        if (allParams.title) url.searchParams.set('title', allParams.title);
-        if (allParams.link) url.searchParams.set('link', allParams.link);
-        if (allParams.sheet) url.searchParams.set('sheet', allParams.sheet);
-
-        // Update the browser address bar without reloading
-        window.history.pushState({}, '', url);
+    const handleDownloadImage = async () => {
+        if (!boardRef.current) return;
+        setLoading(true);
+        try {
+            const canvas = await html2canvas(boardRef.current, {
+                backgroundColor: "#ffffff",
+                scale: 2,
+                windowWidth: 2000,
+                onclone: (doc) => {
+                    const els = doc.querySelectorAll('.overflow-x-auto');
+                    els.forEach(el => { el.style.overflow = 'visible'; el.style.width = 'auto'; });
+                }
+            });
+            const link = document.createElement("a");
+            link.href = canvas.toDataURL("image/png");
+            link.download = `${title}_${scoringMode}.png`;
+            link.click();
+        } catch (e) { console.error(e); }
+        setLoading(false);
     };
 
-    useEffect(() => {
-        const params = new URLSearchParams(window.location.search);
-        const linkParam = params.get("link");
-        const sheetParam = params.get("sheet");
-        const viewParam = params.get("view");
-        const rankParam = params.get("rank");
-        const titleParam = params.get("title");
-
-        if (rankParam) setRankType(rankParam);
-
-        if (viewParam === 'table' || viewParam === 'leaderboard') {
-            setViewMode(viewParam);
-        }
-
-        if (titleParam) setTitle(decodeURIComponent(titleParam));
-
-        updateUrlParams({ rank: rankType, view: viewMode, title: encodeURIComponent(title) });
-
-        const link = (linkParam) ? linkParam : sheetParam;
-        if (link) {
-            setLinkInput(link);
-            handleLink(link);
-        }
-    }, []);
+    // --- RENDER ---
+    const isTable = viewMode === 'table';
+    const containerClass = isTable ? "max-w-7xl" : "max-w-4xl";
 
     return (
-        <div className={containerClasses}>
-            {/* Header */}
-            { !data && (
-                <div className="text-center space-y-2">
-                    <h1 className="text-4xl font-extrabold tracking-tight text-slate-900">Leaderboard Creator</h1>
-                    <p className="text-slate-500">Turn your Google Sheets into visual leaderboards instantly.</p>
-                </div>
-            )}
-
-            {/* Input Section */}
-            {!data && (
-                <div className="grid md:grid-cols-2 gap-6">
-                    {/* File Upload */}
-                    <div className="glass-panel p-8 rounded-2xl flex flex-col items-center justify-center text-center hover:border-blue-400 transition-colors cursor-pointer relative group">
-                        <input 
-                            type="file" 
-                            accept=".csv" 
-                            onChange={handleFileUpload} 
-                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                        />
-                        <div className="bg-blue-50 p-4 rounded-full mb-4 group-hover:bg-blue-100 transition-colors">
-                            <UploadIcon />
-                        </div>
-                        <h3 className="font-semibold text-lg">Upload CSV</h3>
-                        <p className="text-sm text-slate-400 mt-2">Export your sheet as .csv and drop it here</p>
+        <div className={`${containerClass} mx-auto p-6 space-y-8 pb-20`}>
+            {/* --- HEADER / LANDING --- */}
+            {!rawData && (
+                <div className="text-center space-y-8 mt-10">
+                    <div>
+                        <h1 className="text-5xl font-extrabold tracking-tight text-slate-900 mb-4">Leaderboard Creator</h1>
+                        <p className="text-lg text-slate-500 max-w-2xl mx-auto">Visualize your Google Sheets data instantly. No login required.</p>
                     </div>
 
-                    {/* Link Input */}
-                    <div className="glass-panel p-8 rounded-2xl flex flex-col justify-center space-y-4">
-                        <div className="flex items-center gap-2 mb-2">
-                            <div className="bg-emerald-50 p-2 rounded-full text-emerald-600">
-                                <LinkIcon />
+                    <div className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto text-left">
+                         {/* UPLOAD */}
+                        <div className="glass-panel p-8 rounded-2xl hover:border-blue-400 transition-all cursor-pointer relative group flex flex-col items-center justify-center text-center">
+                            <input type="file" accept=".csv" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
+                            <div className="bg-blue-50 p-4 rounded-full mb-4 text-blue-600 group-hover:scale-110 transition-transform"><UploadIcon /></div>
+                            <h3 className="font-bold text-xl mb-2">Upload CSV</h3>
+                            <p className="text-sm text-slate-400">Drag & drop your exported file</p>
+                        </div>
+
+                         {/* LINK */}
+                        <div className="glass-panel p-8 rounded-2xl flex flex-col justify-center space-y-4">
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="bg-emerald-50 p-2 rounded-full text-emerald-600"><LinkIcon /></div>
+                                <h3 className="font-bold text-xl">Paste Link</h3>
                             </div>
-                            <h3 className="font-semibold text-lg">Google Sheet Link</h3>
+                            <div className="flex gap-2">
+                                <input 
+                                    type="text" 
+                                    placeholder="https://docs.google.com/..." 
+                                    value={linkInput}
+                                    onChange={(e) => setLinkInput(e.target.value)}
+                                    className="flex-1 p-3 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white transition-colors outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                                <button onClick={() => handleLink(linkInput)} disabled={!linkInput} className="bg-slate-900 text-white px-6 rounded-lg font-medium hover:bg-slate-800 disabled:opacity-50">Go</button>
+                            </div>
+                            <p className="text-xs text-slate-400">*File &gt; Share &gt; Publish to Web &gt; CSV</p>
                         </div>
-                        <input 
-                            type="text" 
-                            placeholder="Paste Published CSV link..." 
-                            value={linkInput}
-                            onKeyDown={(e) => { if (e.key === 'Enter') handleLinkSubmit(); }}
-                            onChange={(e) => setLinkInput(e.target.value)}
-                            className="w-full p-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                        />
-                        <button 
-                            onClick={handleLinkSubmit}
-                            disabled={!linkInput}
-                            className="w-full bg-slate-900 text-white py-2 rounded-lg font-medium hover:bg-slate-800 disabled:opacity-50 transition-colors"
-                        >
-                            Fetch Leaderboard
-                        </button>
-                        <p className="text-xs text-slate-400">
-                            *Must use <strong>File > Share > Publish to Web</strong>
-                        </p>
                     </div>
                 </div>
             )}
 
-            {/* Error Message */}
-            {error && (
-                <div className="bg-red-50 text-red-600 p-4 rounded-xl border border-red-100 flex items-center gap-2">
-                    <span>⚠️</span> {error}
-                </div>
-            )}
+            {/* --- ERROR --- */}
+            {error && <div className="bg-red-50 text-red-600 p-4 rounded-xl border border-red-100 flex items-center justify-center gap-2"><span>⚠️</span> {error}</div>}
+            
+            {/* --- LOADING --- */}
+            {loading && <div className="text-center py-20"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-900 mx-auto mb-4"></div><p className="text-slate-400 animate-pulse">Crunching numbers...</p></div>}
 
-            {/* Loading State */}
-            {loading && (
-                <div className="text-center py-12">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                    <p className="text-slate-500">Processing...</p>
-                </div>
-            )}
-
-            {/* Main Content Area */}
-            {data && (
+            {/* --- DASHBOARD --- */}
+            {rawData && !loading && (
                 <div className="space-y-6">
-                    {/* Toolbar */}
-                    <div className="flex flex-col sm:flex-row justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-100 gap-4">
-                        <div className="flex gap-2">
-                            <button onClick={handleStartOver} className="text-sm text-slate-500 hover:text-slate-900 font-medium px-4 py-2">← Start Over</button>
+                    {/* CONTROLS */}
+                    <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
+                        <div className="flex gap-2 overflow-x-auto pb-1 md:pb-0 w-full md:w-auto">
+                            <button onClick={() => {setRawData(null); updateUrlParams({link:null});}} className="px-4 py-2 text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors">← Back</button>
+                            <div className="w-px h-8 bg-slate-100 mx-2"></div>
                             
-                            {/* Toggle View Button */}
-                            <button 
-                                onClick={() => setViewMode(viewMode === 'leaderboard' ? 'table' : 'leaderboard')}
-                                className="flex items-center gap-2 bg-slate-100 text-slate-700 px-4 py-2 rounded-lg font-semibold hover:bg-slate-200 transition-colors"
-                            >
-                                <ListIcon /> {viewMode === 'leaderboard' ? 'View Data' : 'View Visuals'}
-                            </button>
+                            {/* Mode Selectors */}
+                            {Object.values(MODES).map(m => (
+                                <button 
+                                    key={m.id}
+                                    onClick={() => setScoringMode(m.id)}
+                                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${scoringMode === m.id ? 'bg-slate-900 text-white shadow-md' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
+                                >
+                                    <span>{m.icon}</span> {m.label}
+                                </button>
+                            ))}
                         </div>
                         
+                        {/* Export Buttons */}
                         <div className="flex gap-2">
-                            <button onClick={handleDownloadImage} className="flex items-center gap-2 bg-blue-100 text-blue-700 px-4 py-2 rounded-lg font-semibold hover:bg-blue-200 transition-colors"><DownloadIcon /> Image</button>
-                            <button onClick={handleDownloadPDF} className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-lg font-semibold hover:bg-slate-800 transition-colors shadow-lg shadow-slate-200"><FileIcon /> PDF</button>
+                                <button onClick={() => setViewMode(viewMode === 'leaderboard' ? 'table' : 'leaderboard')} className="p-2 text-slate-500 hover:bg-slate-50 rounded-lg" title="Toggle View"><ListIcon /></button>
+                                
+                                {/* PDF Button */}
+                                <button 
+                                    onClick={handleDownloadPDF} 
+                                    className="flex items-center gap-2 bg-slate-100 text-slate-700 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-colors"
+                                >
+                                    <FileIcon /> PDF
+                                </button>
+
+                                {/* PNG Button */}
+                                <button 
+                                    onClick={handleDownloadImage} 
+                                    className="flex items-center gap-2 bg-blue-50 text-blue-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-100 transition-colors"
+                                >
+                                    <DownloadIcon /> PNG
+                                </button>
                         </div>
                     </div>
 
-                    {/* CONTENT CONTAINER */}
-                    <div ref={boardRef} className="glass-panel p-8 rounded-3xl space-y-6 min-h-[600px] flex flex-col bg-white">
-                        <div className="text-center mb-6">
+                    {/* MAIN BOARD */}
+                    <div ref={boardRef} className="glass-panel p-10 rounded-3xl min-h-[600px] bg-white relative">
+                        {/* Title */}
+                        <div className="text-center mb-10">
                             {isEditingTitle ? (
-                                // --- EDIT MODE: Input Field ---
-                                <div className="flex justify-center items-center gap-2">
-                                    <span className="text-3xl">
-                                        {viewMode === 'leaderboard' ? '🏆' : '📊'}
-                                    </span>
-                                    <input
-                                        type="text"
-                                        value={title}
-                                        onChange={(e) => setTitle(e.target.value)}
-                                        onBlur={() => {
-                                            setIsEditingTitle(false);
-                                            updateUrlParams({ title: title });
-                                        }}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter') {
-                                                setIsEditingTitle(false);
-                                                updateUrlParams({ title: title });
-                                            }
-                                        }}
-                                        autoFocus
-                                        className="text-3xl font-bold text-slate-800 text-center bg-transparent border-b-2 border-blue-500 focus:outline-none min-w-[200px]"
-                                    />
-                                </div>
+                                <input
+                                    autoFocus
+                                    className="text-4xl font-black text-center text-slate-900 bg-transparent border-b-2 border-blue-500 focus:outline-none w-full max-w-lg mx-auto"
+                                    value={title}
+                                    onChange={(e) => setTitle(e.target.value)}
+                                    onBlur={() => setIsEditingTitle(false)}
+                                    onKeyDown={(e) => e.key === 'Enter' && setIsEditingTitle(false)}
+                                />
                             ) : (
-                                // --- VIEW MODE: Text Heading ---
-                                <h2 
-                                    onDoubleClick={() => setIsEditingTitle(true)}
-                                    className="text-3xl font-bold text-slate-800 cursor-pointer hover:text-blue-600 transition-colors select-none"
-                                    title="Double click to edit title"
-                                >
-                                    {viewMode === 'leaderboard' ? '🏆 ' : '📊 '}
-                                    {title}
-                                </h2>
+                                <h1 onDoubleClick={() => setIsEditingTitle(true)} className="text-4xl font-black text-slate-900 cursor-pointer hover:opacity-70 transition-opacity select-none">{title}</h1>
                             )}
-                            <p className="text-slate-400 text-sm mt-1">{new Date().toLocaleDateString()}</p>
+                            <div className="flex justify-center items-center gap-2 mt-2 text-slate-400 text-sm font-medium uppercase tracking-wider">
+                                <span>{MODES[scoringMode.toUpperCase()].icon} Ranked by {MODES[scoringMode.toUpperCase()].label}</span>
+                                <span>•</span>
+                                <span>{new Date().toLocaleDateString()}</span>
+                            </div>
                         </div>
 
-                        {/* --- VIEW 1: VISUAL CARDS --- */}
+                        {/* --- VIEW: CARDS --- */}
                         {viewMode === 'leaderboard' && (
-                            <div className="flex-1 space-y-3">
-                                <div className="grid grid-cols-12 gap-4 px-6 py-2 text-xs font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                            <div className="space-y-3">
+                                <div className="grid grid-cols-12 gap-4 px-6 py-2 text-xs font-bold text-slate-300 uppercase tracking-widest">
                                     <div className="col-span-1 text-center">#</div>
                                     <div className="col-span-5">Participant</div>
-                                    <div className="col-span-2 text-center">Score</div>
-                                    <div className="col-span-4 text-right">Progress</div>
+                                    <div className="col-span-2 text-center">{scoringMode === 'points' ? 'XP' : scoringMode === 'streak' ? 'Streak' : 'Days'}</div>
+                                    <div className="col-span-4 text-right">Activity</div>
                                 </div>
-                                {data.map((user, index) => {
-                                    const rank = getRank(user, index, data);
-                                    const percent = dates.length > 0 ? Math.round((user.score / dates.length) * 100) : 0;
+
+                                {sortedData.map((user, idx) => {
+                                    const rank = getRank(user, idx, sortedData);
+                                    
+                                    // Progress Bar Logic
+                                    const maxScore = Math.max(...sortedData.map(u => u.stats[scoringMode]), 1);
+                                    const totalDays = dates.length || 1;
+                                    
+                                    let percent = 0;
+                                    let displayScore = user.stats[scoringMode];
+                                    let suffix = '';
+
+                                    if (scoringMode === 'points') {
+                                        percent = (user.stats.points / maxScore) * 100;
+                                    } else if (scoringMode === 'consistency') {
+                                        percent = (user.stats.consistency / totalDays) * 100;
+                                        suffix = ` / ${totalDays}`;
+                                    } else if (scoringMode === 'streak') {
+                                        percent = (user.stats.streak / totalDays) * 100;
+                                        suffix = ' days';
+                                    }
+
                                     return (
-                                        <div key={user.id} className={`grid grid-cols-12 gap-4 items-center p-4 rounded-xl border transition-transform ${getRankStyle(rank)}`}>
-                                            <div className="col-span-1 flex justify-center">{getMedalIcon(rank)}
+                                        <div key={user.id} className={`grid grid-cols-12 gap-4 items-center p-5 rounded-2xl border-2 transition-all ${getRankStyle(rank)}`}>
+                                            <div className="col-span-1 flex justify-center scale-110">{getMedalIcon(rank)}</div>
+                                            <div className="col-span-5 font-bold text-lg truncate">{user.name}</div>
+                                            <div className="col-span-2 text-center font-mono font-bold text-xl">
+                                                {displayScore}<span className="text-xs opacity-50 ml-1 font-sans font-normal">{suffix}</span>
                                             </div>
-                                            <div className="col-span-5 font-bold truncate flex items-center h-full">
-                                                {user.name}
-                                            </div>
-                                            <div className="col-span-2 font-mono font-bold text-lg flex items-center justify-center h-full">
-                                                {user.score}
-                                            </div>
-                                            <div className="col-span-4 flex flex-col justify-end gap-1">
-                                                <div className="flex justify-between items-center w-full">
-                                                    <span className="text-xs font-medium opacity-60 ml-auto">{percent}%
-                                                    </span>
-                                                </div>
-                                                <div className="h-2 bg-slate-200/50 rounded-full w-full overflow-hidden relative">
-                                                    <div className="absolute top-0 left-0 h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${percent}%` }}>
-                                                    </div>
+                                            <div className="col-span-4">
+                                                <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                                                    {/* Updated Progress Bar Color Logic Here */}
+                                                    <div className={`h-full rounded-full ${getBarColor(rank)}`} style={{width: `${percent}%`}}></div>
                                                 </div>
                                             </div>
                                         </div>
@@ -491,31 +430,32 @@ const App = () => {
                             </div>
                         )}
 
-                        {/* --- VIEW 2: DATA TABLE (NEW) --- */}
+                        {/* --- VIEW: TABLE --- */}
                         {viewMode === 'table' && (
-                            <div className="overflow-x-auto custom-scroll">
+                            <div className="overflow-x-auto custom-scroll pb-4">
                                 <table className="w-full text-sm text-left border-collapse">
-                                    <thead className="text-xs text-slate-400 uppercase bg-slate-50 border-b border-slate-200">
-                                        <tr>
-                                            <th className="px-4 py-3 text-center w-12">#</th>
-                                            <th className="px-4 py-3 border-r border-slate-100">Name</th>
-                                            <th className="px-4 py-3 text-center font-bold text-slate-700 bg-slate-100/50">Total</th>
-                                            {/* Render Date Columns */}
-                                            {dates.map((date, i) => (
-                                                <th key={i} className="px-2 py-3 text-center whitespace-nowrap min-w-[60px]">{date}</th>
-                                            ))}
+                                    <thead>
+                                        <tr className="border-b-2 border-slate-100 text-xs text-slate-400 uppercase tracking-wider">
+                                            <th className="px-4 py-4 text-center">#</th>
+                                            <th className="px-4 py-4 border-r border-slate-100 sticky left-0 bg-white z-10">Name</th>
+                                            <th className="px-4 py-4 text-center bg-slate-50 text-slate-900 font-bold border-r border-slate-200">
+                                                {scoringMode === 'points' ? 'XP' : scoringMode === 'streak' ? 'Streak' : 'Days'}
+                                            </th>
+                                            {dates.map((d, i) => <th key={i} className="px-2 py-4 text-center min-w-[60px] font-medium">{d}</th>)}
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {data.map((user, idx) => (
-                                            <tr key={user.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
-                                                <td className="px-4 py-3 text-center font-mono text-slate-400">{idx + 1}</td>
-                                                <td className="px-4 py-3 font-medium text-slate-700 border-r border-slate-100">{user.name}</td>
-                                                <td className="px-4 py-3 text-center font-bold text-slate-900 bg-slate-50/30">{user.score}</td>
-                                                {/* Render Date Cells using History */}
-                                                {user.history.map((done, i) => (
-                                                    <td key={i} className="px-2 py-3 text-center">
-                                                        {done ? '✅' : <span className="text-slate-200">·</span>}
+                                        {sortedData.map((user, idx) => (
+                                            <tr key={user.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                                                <td className="px-4 py-3 text-center text-slate-400 font-mono">{idx + 1}</td>
+                                                <td className="px-4 py-3 font-semibold text-slate-700 border-r border-slate-100 sticky left-0 bg-white z-10">{user.name}</td>
+                                                <td className="px-4 py-3 text-center font-bold text-slate-900 bg-slate-50 border-r border-slate-200">{user.stats[scoringMode]}</td>
+                                                {user.history.map((count, i) => (
+                                                    <td key={i} className="px-2 py-3 text-center whitespace-nowrap">
+                                                        {count > 0 
+                                                            ? (count > 1 ? <span className="bg-slate-900 text-white text-[10px] px-1.5 py-0.5 rounded-md font-bold">{count}</span> : '✅') 
+                                                            : <span className="text-slate-200">·</span>
+                                                        }
                                                     </td>
                                                 ))}
                                             </tr>
@@ -527,8 +467,9 @@ const App = () => {
                     </div>
                 </div>
             )}
-            <div className="text-center pt-8 border-t border-slate-100 text-slate-400 text-xs">
-                <a href="https://github.com/nihaltp/leaderboard">Made</a> with ❤️ by <a href="https://github.com/nihaltp">nihaltp</a>
+            
+            <div className="text-center text-slate-300 text-sm">
+                <a href="https://github.com/nihaltp/leaderboard" className="hover:text-slate-500">Made</a> with ❤️ by <a href="https://github.com/nihaltp" className="hover:text-slate-500">nihaltp</a>
             </div>
         </div>
     );
