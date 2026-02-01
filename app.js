@@ -42,6 +42,7 @@ const App = () => {
     const [viewMode, setViewMode] = useState('leaderboard'); // 'leaderboard' | 'table'
     const [rankType, setRankType] = useState('dense'); // 'dense' | 'competition'
     const [scoringMode, setScoringMode] = useState('points'); // 'points' | 'consistency' | 'streak'
+    const [softMode, setSoftMode] = useState(false); // Soft Mode State
     const [title, setTitle] = useState('Event Leaderboard');
     const [isEditingTitle, setIsEditingTitle] = useState(false);
 
@@ -132,6 +133,52 @@ const App = () => {
         return sorted;
     }, [rawData, scoringMode]);
 
+    // --- CALCULATED TOTAL DAYS (MEMOIZED) ---
+    const totalCalculatedDays = useMemo(() => {
+        if (!rawData || !dates.length) return 1;
+        
+        if (!softMode) return dates.length;
+
+        // Soft Mode: Count days where at least one person has activity
+        let activeDays = 0;
+        for (let i = 0; i < dates.length; i++) {
+            const isDayActive = rawData.some(user => user.history[i] > 0);
+            if (isDayActive) activeDays++;
+        }
+        return activeDays || 1; // Prevent division by zero
+    }, [rawData, dates, softMode]);
+
+    // --- TABLE COLUMNS (Smart Trim Logic) ---
+    const tableColumns = useMemo(() => {
+        if (!dates.length || !rawData) return [];
+
+        const cols = [];
+        let lastWasBreak = false;
+
+        for (let i = 0; i < dates.length; i++) {
+            // Check if ANY user has activity on this day
+            const isActive = rawData.some(u => u.history[i] > 0);
+
+            if (isActive) {
+                cols.push({ type: 'data', index: i, date: dates[i] });
+                lastWasBreak = false;
+            } else {
+                // If it's an empty day, we might want to insert a break
+                if (!lastWasBreak) {
+                    cols.push({ type: 'break' });
+                    lastWasBreak = true;
+                }
+            }
+        }
+        
+        // remove trailing break if it exists
+        if (cols.length > 0 && cols[cols.length - 1].type === 'break') {
+            cols.pop();
+        }
+
+        return cols;
+    }, [dates, rawData]);
+
     // --- HANDLERS ---
     const handleFileUpload = (e) => {
         const file = e.target.files[0];
@@ -184,6 +231,7 @@ const App = () => {
         if (merged.mode) url.searchParams.set('mode', merged.mode);
         if (merged.title) url.searchParams.set('title', merged.title);
         if (merged.link) url.searchParams.set('link', merged.link);
+        if (merged.soft) url.searchParams.set('soft', merged.soft); // Save Soft Mode
         
         window.history.pushState({}, '', url);
     };
@@ -193,6 +241,7 @@ const App = () => {
         if (params.get("title")) setTitle(decodeURIComponent(params.get("title")));
         if (params.get("mode") && MODES[params.get("mode").toUpperCase()]) setScoringMode(params.get("mode"));
         if (params.get("view")) setViewMode(params.get("view"));
+        if (params.get("soft") === 'true') setSoftMode(true); // Load Soft Mode
         
         const link = params.get("link");
         if (link) {
@@ -202,8 +251,8 @@ const App = () => {
     }, []);
 
     useEffect(() => {
-        if(rawData) updateUrlParams({ mode: scoringMode, view: viewMode, title: encodeURIComponent(title) });
-    }, [scoringMode, viewMode, title, rawData]);
+        if(rawData) updateUrlParams({ mode: scoringMode, view: viewMode, title: encodeURIComponent(title), soft: softMode });
+    }, [scoringMode, viewMode, title, softMode, rawData]);
 
 
     // --- HELPERS ---
@@ -319,7 +368,7 @@ const App = () => {
                 <div className="space-y-6">
                     {/* CONTROLS */}
                     <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
-                        <div className="flex gap-2 overflow-x-auto pb-1 md:pb-0 w-full md:w-auto">
+                        <div className="flex gap-2 overflow-x-auto pb-1 md:pb-0 w-full md:w-auto items-center">
                             <button onClick={() => {setRawData(null); updateUrlParams({link:null});}} className="px-4 py-2 text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors">← Back</button>
                             <div className="w-px h-8 bg-slate-100 mx-2"></div>
                             
@@ -377,17 +426,29 @@ const App = () => {
                                 <span>{MODES[scoringMode.toUpperCase()].icon} Ranked by {MODES[scoringMode.toUpperCase()].label}</span>
                                 <span>•</span>
                                 <span>{new Date().toLocaleDateString()}</span>
+                                {scoringMode === 'consistency' && softMode && <span className="text-emerald-500">• Soft Mode Active</span>}
                             </div>
                         </div>
 
                         {/* --- VIEW: CARDS --- */}
                         {viewMode === 'leaderboard' && (
                             <div className="space-y-3">
-                                <div className="grid grid-cols-12 gap-4 px-6 py-2 text-xs font-bold text-slate-300 uppercase tracking-widest">
+                                <div className="grid grid-cols-12 gap-4 px-6 py-2 text-xs font-bold text-slate-300 uppercase tracking-widest items-center">
                                     <div className="col-span-1 text-center">#</div>
                                     <div className="col-span-5">Participant</div>
                                     <div className="col-span-2 text-center">{scoringMode === 'points' ? 'XP' : scoringMode === 'streak' ? 'Streak' : 'Days'}</div>
-                                    <div className="col-span-4 text-right">Activity</div>
+                                    <div className="col-span-4 flex justify-end items-center gap-2">
+                                        {/* Soft Mode Toggle Here */}
+                                        {scoringMode === 'consistency' && (
+                                            <button 
+                                                onClick={() => setSoftMode(!softMode)}
+                                                className={`text-[10px] px-2 py-0.5 rounded-md border font-bold transition-all ${softMode ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-400 border-slate-200 hover:border-slate-300'}`}
+                                            >
+                                                {softMode ? 'Soft: ON' : 'Soft: OFF'}
+                                            </button>
+                                        )}
+                                        <span>Activity</span>
+                                    </div>
                                 </div>
 
                                 {sortedData.map((user, idx) => {
@@ -395,7 +456,9 @@ const App = () => {
                                     
                                     // Progress Bar Logic
                                     const maxScore = Math.max(...sortedData.map(u => u.stats[scoringMode]), 1);
-                                    const totalDays = dates.length || 1;
+                                    
+                                    // Use Calculated Total Days (Soft Mode sensitive)
+                                    const totalDays = totalCalculatedDays;
                                     
                                     let percent = 0;
                                     let displayScore = user.stats[scoringMode];
@@ -441,7 +504,12 @@ const App = () => {
                                             <th className="px-4 py-4 text-center bg-slate-50 text-slate-900 font-bold border-r border-slate-200">
                                                 {scoringMode === 'points' ? 'XP' : scoringMode === 'streak' ? 'Streak' : 'Days'}
                                             </th>
-                                            {dates.map((d, i) => <th key={i} className="px-2 py-4 text-center min-w-[60px] font-medium">{d}</th>)}
+                                            {/* Dynamic Columns (Active Dates + Breaks) */}
+                                            {tableColumns.map((col, i) => (
+                                                <th key={i} className={`px-2 py-4 text-center min-w-[40px] font-medium ${col.type === 'break' ? 'text-slate-300' : ''}`}>
+                                                    {col.type === 'break' ? '⋮' : col.date}
+                                                </th>
+                                            ))}
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -450,14 +518,23 @@ const App = () => {
                                                 <td className="px-4 py-3 text-center text-slate-400 font-mono">{idx + 1}</td>
                                                 <td className="px-4 py-3 font-semibold text-slate-700 border-r border-slate-100 sticky left-0 bg-white z-10">{user.name}</td>
                                                 <td className="px-4 py-3 text-center font-bold text-slate-900 bg-slate-50 border-r border-slate-200">{user.stats[scoringMode]}</td>
-                                                {user.history.map((count, i) => (
-                                                    <td key={i} className="px-2 py-3 text-center whitespace-nowrap">
-                                                        {count > 0 
-                                                            ? (count > 1 ? <span className="bg-slate-900 text-white text-[10px] px-1.5 py-0.5 rounded-md font-bold">{count}</span> : '✅') 
-                                                            : <span className="text-slate-200">·</span>
-                                                        }
-                                                    </td>
-                                                ))}
+                                                
+                                                {/* Render Cells based on Table Columns */}
+                                                {tableColumns.map((col, i) => {
+                                                    if (col.type === 'break') {
+                                                        return <td key={i} className="px-2 py-3 text-center text-slate-200 bg-slate-50/30">⋮</td>;
+                                                    }
+                                                    
+                                                    const count = user.history[col.index];
+                                                    return (
+                                                        <td key={i} className="px-2 py-3 text-center whitespace-nowrap">
+                                                            {count > 0 
+                                                                ? (count > 1 ? <span className="bg-slate-900 text-white text-[10px] px-1.5 py-0.5 rounded-md font-bold">{count}</span> : '✅') 
+                                                                : <span className="text-slate-200">·</span>
+                                                            }
+                                                        </td>
+                                                    );
+                                                })}
                                             </tr>
                                         ))}
                                     </tbody>
