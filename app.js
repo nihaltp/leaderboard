@@ -21,6 +21,9 @@ const TrophyIcon = ({ className }) => (
 const ListIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
 );
+const CopyIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+);
 
 // --- CONSTANTS ---
 const MODES = {
@@ -37,6 +40,7 @@ const App = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [linkInput, setLinkInput] = useState('');
+    const [copied, setCopied] = useState(false); // For copy button feedback
     
     // View Config
     const [viewMode, setViewMode] = useState('leaderboard'); // 'leaderboard' | 'table'
@@ -258,6 +262,12 @@ const App = () => {
         }
     };
 
+    const handleCopyUrl = () => {
+        navigator.clipboard.writeText(window.location.href);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
     // --- URL SYNC ---
     const updateUrlParams = (newParams = {}) => {
         const url = new URL(window.location);
@@ -455,6 +465,19 @@ const App = () => {
 
                     {/* MAIN BOARD */}
                     <div ref={boardRef} className="glass-panel p-10 rounded-3xl min-h-[600px] bg-white relative">
+                        
+                        {/* Copy Link Button - Top Right Absolute */}
+                        <button 
+                            onClick={handleCopyUrl}
+                            className="absolute top-6 right-6 p-2 text-slate-300 hover:text-slate-600 hover:bg-slate-50 rounded-full transition-all group z-10 print:hidden"
+                            aria-label="Copy Leaderboard Link"
+                        >
+                            <CopyIcon />
+                            <span className="absolute right-full top-1/2 -translate-y-1/2 mr-3 px-2 py-1 bg-slate-900 text-white text-xs font-bold rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none shadow-lg">
+                                {copied ? 'Copied!' : 'Copy Link'}
+                            </span>
+                        </button>
+
                         {/* Title */}
                         <div className="text-center mb-10">
                             {isEditingTitle ? (
