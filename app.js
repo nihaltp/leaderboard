@@ -26,7 +26,7 @@ const ListIcon = () => (
 const MODES = {
     POINTS: { id: 'points', label: 'Total Points', icon: '⚡', desc: 'Every check counts' },
     CONSISTENCY: { id: 'consistency', label: 'Consistency', icon: '📅', desc: 'Days completed' },
-    STREAK: { id: 'streak', label: 'Current Streak', icon: '🔥', desc: 'Consecutive days' }
+    STREAK: { id: 'streak', label: 'Streak', icon: '🔥', desc: 'Consecutive days' }
 };
 
 // --- Main App Component ---
@@ -43,6 +43,7 @@ const App = () => {
     const [rankType, setRankType] = useState('dense'); // 'dense' | 'competition'
     const [scoringMode, setScoringMode] = useState('points'); // 'points' | 'consistency' | 'streak'
     const [softMode, setSoftMode] = useState(false); // Soft Mode State
+    const [showMaxStreak, setShowMaxStreak] = useState(false); // Max Streak Toggle State
     const [title, setTitle] = useState('Event Leaderboard');
     const [isEditingTitle, setIsEditingTitle] = useState(false);
 
@@ -72,6 +73,12 @@ const App = () => {
                 let consistency = 0;
                 const history = []; // Capture the raw data per day
 
+                // Max Streak Calculation Vars
+                let currentRun = 0;
+                let maxRun = 0;
+                let currentRunIndices = [];
+                let maxRunIndices = new Set();
+
                 for (let j = 1; j <= dateHeaders.length; j++) {
                     const cellValue = row[j] ? row[j].trim() : '';
                     const count = [...cellValue].filter(ch => ch === '✅').length;
@@ -79,11 +86,34 @@ const App = () => {
                     if (count > 0) {
                         points += count;   // Mode 1: All checks
                         consistency += 1;  // Mode 2: Days active
+                        
+                        // Streak Tracking
+                        currentRun++;
+                        currentRunIndices.push(j - 1); // Store 0-based index
+                    } else {
+                        // End of a run
+                        if (currentRun > maxRun) {
+                            maxRun = currentRun;
+                            maxRunIndices = new Set(currentRunIndices);
+                        } else if (currentRun === maxRun && maxRun > 0) {
+                            // If we have multiple streaks of the same max length, track them all
+                            currentRunIndices.forEach(idx => maxRunIndices.add(idx));
+                        }
+                        currentRun = 0;
+                        currentRunIndices = [];
                     }
                     history.push(count);
                 }
 
-                // Calculate Streak (Mode 3: Consecutive days)
+                // Final check for streak at the end
+                if (currentRun > maxRun) {
+                    maxRun = currentRun;
+                    maxRunIndices = new Set(currentRunIndices);
+                } else if (currentRun === maxRun && maxRun > 0) {
+                    currentRunIndices.forEach(idx => maxRunIndices.add(idx));
+                }
+
+                // Calculate Current Streak (Mode 3: Consecutive days backwards)
                 let streak = 0;
                 for (let k = history.length - 1; k >= 0; k--) {
                     if (history[k] > 0) streak++;
@@ -96,7 +126,9 @@ const App = () => {
                     stats: {
                         points,
                         consistency,
-                        streak
+                        streak,
+                        max_streak: maxRun,
+                        maxStreakIndices: maxRunIndices
                     },
                     history
                 });
@@ -118,8 +150,15 @@ const App = () => {
         
         // clone and sort
         const sorted = [...rawData].sort((a, b) => {
-            const valA = a.stats[scoringMode];
-            const valB = b.stats[scoringMode];
+            // Determine Value based on toggle
+            let valA = a.stats[scoringMode];
+            let valB = b.stats[scoringMode];
+
+            // If in Streak Mode AND Max Streak Toggle is ON, use max_streak
+            if (scoringMode === 'streak' && showMaxStreak) {
+                valA = a.stats.max_streak;
+                valB = b.stats.max_streak;
+            }
             
             // Primary sort: selected mode
             if (valB !== valA) return valB - valA;
@@ -131,7 +170,7 @@ const App = () => {
         });
 
         return sorted;
-    }, [rawData, scoringMode]);
+    }, [rawData, scoringMode, showMaxStreak]);
 
     // --- CALCULATED TOTAL DAYS (MEMOIZED) ---
     const totalCalculatedDays = useMemo(() => {
@@ -232,6 +271,7 @@ const App = () => {
         if (merged.title) url.searchParams.set('title', merged.title);
         if (merged.link) url.searchParams.set('link', merged.link);
         if (merged.soft) url.searchParams.set('soft', merged.soft); // Save Soft Mode
+        if (merged.max) url.searchParams.set('max', merged.max); // Save Max Streak Param
         
         window.history.pushState({}, '', url);
     };
@@ -242,6 +282,7 @@ const App = () => {
         if (params.get("mode") && MODES[params.get("mode").toUpperCase()]) setScoringMode(params.get("mode"));
         if (params.get("view")) setViewMode(params.get("view"));
         if (params.get("soft") === 'true') setSoftMode(true); // Load Soft Mode
+        if (params.get("max") === 'true') setShowMaxStreak(true);
         
         const link = params.get("link");
         if (link) {
@@ -251,8 +292,8 @@ const App = () => {
     }, []);
 
     useEffect(() => {
-        if(rawData) updateUrlParams({ mode: scoringMode, view: viewMode, title: encodeURIComponent(title), soft: softMode });
-    }, [scoringMode, viewMode, title, softMode, rawData]);
+        if(rawData) updateUrlParams({ mode: scoringMode, view: viewMode, title: encodeURIComponent(title), soft: softMode, max: showMaxStreak });
+    }, [scoringMode, viewMode, title, softMode, showMaxStreak, rawData]);
 
 
     // --- HELPERS ---
@@ -261,9 +302,15 @@ const App = () => {
     };
 
     const getRank = (user, index, allData) => {
-        const score = user.stats[scoringMode];
+        // Calculate the score used for sorting to determine density
+        let score = user.stats[scoringMode];
+        if (scoringMode === 'streak' && showMaxStreak) score = user.stats.max_streak;
+
         if (rankType === 'dense') {
-            const unique = [...new Set(allData.map(u => u.stats[scoringMode]))];
+            const unique = [...new Set(allData.map(u => {
+                if (scoringMode === 'streak' && showMaxStreak) return u.stats.max_streak;
+                return u.stats[scoringMode];
+            }))];
             return unique.indexOf(score);
         }
         return index;
@@ -427,6 +474,7 @@ const App = () => {
                                 <span>•</span>
                                 <span>{new Date().toLocaleDateString()}</span>
                                 {scoringMode === 'consistency' && softMode && <span className="text-emerald-500">• Soft Mode Active</span>}
+                                {scoringMode === 'streak' && showMaxStreak && <span className="text-emerald-500">• Max Streak On</span>}
                             </div>
                         </div>
 
@@ -436,7 +484,9 @@ const App = () => {
                                 <div className="grid grid-cols-12 gap-4 px-6 py-2 text-xs font-bold text-slate-300 uppercase tracking-widest items-center">
                                     <div className="col-span-1 text-center">#</div>
                                     <div className="col-span-5">Participant</div>
-                                    <div className="col-span-2 text-center">{scoringMode === 'points' ? 'XP' : scoringMode === 'streak' ? 'Streak' : 'Days'}</div>
+                                    <div className="col-span-2 text-center">
+                                        {(scoringMode === 'streak' && showMaxStreak) ? 'Max Streak' : (scoringMode === 'points' ? 'XP' : scoringMode === 'streak' ? 'Streak' : 'Days')}
+                                    </div>
                                     <div className="col-span-4 flex justify-end items-center gap-2">
                                         {/* Soft Mode Toggle Here */}
                                         {scoringMode === 'consistency' && (
@@ -447,6 +497,15 @@ const App = () => {
                                                 {softMode ? 'Soft: ON' : 'Soft: OFF'}
                                             </button>
                                         )}
+                                        {/* Max Streak Toggle (Only for Streak Mode) */}
+                                        {scoringMode === 'streak' && (
+                                            <button 
+                                                onClick={() => setShowMaxStreak(!showMaxStreak)}
+                                                className={`text-[10px] px-2 py-0.5 rounded-md border font-bold transition-all ${showMaxStreak ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-400 border-slate-200 hover:border-slate-300'}`}
+                                            >
+                                                {showMaxStreak ? 'Max: ON' : 'Max: OFF'}
+                                            </button>
+                                        )}
                                         <span>Activity</span>
                                     </div>
                                 </div>
@@ -455,23 +514,35 @@ const App = () => {
                                     const rank = getRank(user, idx, sortedData);
                                     
                                     // Progress Bar Logic
-                                    const maxScore = Math.max(...sortedData.map(u => u.stats[scoringMode]), 1);
-                                    
-                                    // Use Calculated Total Days (Soft Mode sensitive)
-                                    const totalDays = totalCalculatedDays;
-                                    
-                                    let percent = 0;
+                                    // Determine the Max Value for the bar depending on what we are showing
+                                    let maxScore = 1;
                                     let displayScore = user.stats[scoringMode];
+                                    let percent = 0;
                                     let suffix = '';
 
-                                    if (scoringMode === 'points') {
-                                        percent = (user.stats.points / maxScore) * 100;
-                                    } else if (scoringMode === 'consistency') {
-                                        percent = (user.stats.consistency / totalDays) * 100;
-                                        suffix = ` / ${totalDays}`;
-                                    } else if (scoringMode === 'streak') {
-                                        percent = (user.stats.streak / totalDays) * 100;
+                                    // Use Calculated Total Days (Soft Mode sensitive)
+                                    const totalDays = totalCalculatedDays;
+
+                                    if (scoringMode === 'streak' && showMaxStreak) {
+                                        // Max Streak Mode View
+                                        displayScore = user.stats.max_streak;
+                                        maxScore = totalDays; // Streaks compare to total days
+                                        percent = (displayScore / maxScore) * 100;
                                         suffix = ' days';
+                                    } else {
+                                        // Standard Views
+                                        if (scoringMode === 'points') {
+                                            maxScore = Math.max(...sortedData.map(u => u.stats.points), 1);
+                                            percent = (displayScore / maxScore) * 100;
+                                        } else if (scoringMode === 'consistency') {
+                                            maxScore = totalDays;
+                                            percent = (displayScore / maxScore) * 100;
+                                            suffix = ` / ${totalDays}`;
+                                        } else if (scoringMode === 'streak') {
+                                            maxScore = totalDays;
+                                            percent = (displayScore / maxScore) * 100; 
+                                            suffix = ' days';
+                                        }
                                     }
 
                                     return (
@@ -501,8 +572,16 @@ const App = () => {
                                         <tr className="border-b-2 border-slate-100 text-xs text-slate-400 uppercase tracking-wider">
                                             <th className="px-4 py-4 text-center">#</th>
                                             <th className="px-4 py-4 border-r border-slate-100 sticky left-0 bg-white z-10">Name</th>
-                                            <th className="px-4 py-4 text-center bg-slate-50 text-slate-900 font-bold border-r border-slate-200">
-                                                {scoringMode === 'points' ? 'XP' : scoringMode === 'streak' ? 'Streak' : 'Days'}
+                                            <th className="px-4 py-4 text-center bg-slate-50 text-slate-900 font-bold border-r border-slate-200 min-w-[120px]">
+                                                <div className="flex flex-col items-center gap-1">
+                                                    <span>{(scoringMode === 'streak' && showMaxStreak) ? 'Max Streak' : (scoringMode === 'points' ? 'XP' : scoringMode === 'streak' ? 'Streak' : 'Days')}</span>
+                                                    <button 
+                                                        onClick={() => setShowMaxStreak(!showMaxStreak)}
+                                                        className={`text-[9px] px-1.5 py-0.5 rounded border font-bold transition-all ${showMaxStreak ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-400 border-slate-200 hover:border-slate-300'}`}
+                                                    >
+                                                        {showMaxStreak ? 'Max: ON' : 'Max: OFF'}
+                                                    </button>
+                                                </div>
                                             </th>
                                             {/* Dynamic Columns (Active Dates + Breaks) */}
                                             {tableColumns.map((col, i) => (
@@ -517,7 +596,9 @@ const App = () => {
                                             <tr key={user.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
                                                 <td className="px-4 py-3 text-center text-slate-400 font-mono">{idx + 1}</td>
                                                 <td className="px-4 py-3 font-semibold text-slate-700 border-r border-slate-100 sticky left-0 bg-white z-10">{user.name}</td>
-                                                <td className="px-4 py-3 text-center font-bold text-slate-900 bg-slate-50 border-r border-slate-200">{user.stats[scoringMode]}</td>
+                                                <td className="px-4 py-3 text-center font-bold text-slate-900 bg-slate-50 border-r border-slate-200">
+                                                    { (scoringMode === 'streak' && showMaxStreak) ? user.stats.max_streak : user.stats[scoringMode] }
+                                                </td>
                                                 
                                                 {/* Render Cells based on Table Columns */}
                                                 {tableColumns.map((col, i) => {
@@ -526,8 +607,10 @@ const App = () => {
                                                     }
                                                     
                                                     const count = user.history[col.index];
+                                                    const isMaxStreakPart = showMaxStreak && user.stats.maxStreakIndices.has(col.index);
+
                                                     return (
-                                                        <td key={i} className="px-2 py-3 text-center whitespace-nowrap">
+                                                        <td key={i} className={`px-2 py-3 text-center whitespace-nowrap ${isMaxStreakPart ? 'bg-emerald-100' : ''}`}>
                                                             {count > 0 
                                                                 ? (count > 1 ? <span className="bg-slate-900 text-white text-[10px] px-1.5 py-0.5 rounded-md font-bold">{count}</span> : '✅') 
                                                                 : <span className="text-slate-200">·</span>
